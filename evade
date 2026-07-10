@@ -577,7 +577,7 @@ Tabs.Utility:AddToggle("TimerToggle", {
 Tabs.Utility:AddButton({
     Title = "fly",
     Callback = function()
-loadstring(game:HttpGet("https://raw.githubusercontent.com/haoxiao0/qwqcs/refs/heads/main/tpfly.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/zsygdm/kaiyuan--hao/refs/heads/main/flyui"))()
     end
 })
 
