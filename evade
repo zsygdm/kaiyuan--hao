@@ -1,4 +1,4 @@
-local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/haoxiao0/qwqcs/refs/heads/main/qwqui1.lua"))()
+local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/zsygdm/kaiyuan--hao/refs/heads/main/qwqui"))()
 
 local Window = Fluent:CreateWindow({
     Title = "QWQ",
