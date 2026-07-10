@@ -1,0 +1,584 @@
+local Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/haoxiao0/qwqcs/refs/heads/main/qwqui1.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "QWQ",
+    SubTitle = "1.0",
+    TabWidth = 100,
+    Size = UDim2.fromOffset(450, 350),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Auto = Window:AddTab({ Title = "自动" }),
+    Teleport = Window:AddTab({ Title = "传送" }),
+    ESP = Window:AddTab({ Title = "透视" }),
+    Utility = Window:AddTab({ Title = "实用" })
+}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- 悬浮窗 UI 系统 (右上角数据展示)
+-- ==========================================
+local CoreGui = game:GetService("CoreGui")
+local ScreenGui = CoreGui:FindFirstChild("QWQ_OverlayGui")
+if ScreenGui then ScreenGui:Destroy() end
+
+ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "QWQ_OverlayGui"
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+local OverlayFrame = Instance.new("Frame")
+OverlayFrame.Size = UDim2.new(0, 150, 0, 100)
+OverlayFrame.Position = UDim2.new(1, -20, 0, 20)
+OverlayFrame.AnchorPoint = Vector2.new(1, 0)
+OverlayFrame.BackgroundTransparency = 1
+OverlayFrame.Parent = ScreenGui
+
+local OverlayLayout = Instance.new("UIListLayout")
+OverlayLayout.SortOrder = Enum.SortOrder.LayoutOrder
+OverlayLayout.Padding = UDim.new(0, 5)
+OverlayLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+OverlayLayout.Parent = OverlayFrame
+
+local FpsLabel = Instance.new("TextLabel")
+FpsLabel.Size = UDim2.new(0, 100, 0, 25)
+FpsLabel.BackgroundTransparency = 1
+FpsLabel.Font = Enum.Font.GothamBold
+FpsLabel.TextSize = 16
+FpsLabel.TextXAlignment = Enum.TextXAlignment.Right
+FpsLabel.TextStrokeTransparency = 0.2
+FpsLabel.Visible = false
+FpsLabel.LayoutOrder = 1
+FpsLabel.Parent = OverlayFrame
+
+local TimerLabel = Instance.new("TextLabel")
+TimerLabel.Size = UDim2.new(0, 150, 0, 25)
+TimerLabel.BackgroundTransparency = 1
+TimerLabel.Font = Enum.Font.GothamBold
+TimerLabel.TextSize = 16
+TimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TimerLabel.TextXAlignment = Enum.TextXAlignment.Right
+TimerLabel.TextStrokeTransparency = 0.2
+TimerLabel.Visible = false
+TimerLabel.LayoutOrder = 2
+TimerLabel.Parent = OverlayFrame
+
+
+-- ==========================================
+-- 模块一：自动功能 (重连、跳过大厅 & 双重投票)
+-- ==========================================
+local changeModeEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Player"):WaitForChild("ChangePlayerMode")
+
+Tabs.Auto:AddSection("重连控制")
+
+Tabs.Auto:AddButton({
+    Title = "重新加入游戏",
+    Callback = function()
+        pcall(function() changeModeEvent:FireServer(true) end)
+    end
+})
+
+local autoRejoinOnRagdoll = false
+local ragdollCheckTask = nil
+
+Tabs.Auto:AddToggle("AutoRejoinToggle", {
+    Title = "倒地/瘫痪后自动重连",
+    Description = "检测到角色进入布娃娃倒地状态1秒后，自动重新加入游戏",
+    Default = false,
+    Callback = function(state)
+        autoRejoinOnRagdoll = state
+        if autoRejoinOnRagdoll then
+            ragdollCheckTask = task.spawn(function()
+                while autoRejoinOnRagdoll do
+                    task.wait(0.3) 
+                    local char = LocalPlayer.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        local currentState = hum:GetState()
+                        if currentState == Enum.HumanoidStateType.Ragdoll 
+                        or currentState == Enum.HumanoidStateType.FallingDown 
+                        or currentState == Enum.HumanoidStateType.Dead 
+                        or hum.PlatformStand 
+                        or hum.Health <= 0 then
+                            task.wait(1)
+                            if char and hum and (hum:GetState() == Enum.HumanoidStateType.Ragdoll or hum.PlatformStand or hum.Health <= 0) then
+                                pcall(function() changeModeEvent:FireServer(true) end)
+                                task.wait(3) 
+                            end
+                        end
+                    end
+                end
+            end)
+        else
+            if ragdollCheckTask then
+                task.cancel(ragdollCheckTask)
+                ragdollCheckTask = nil
+            end
+        end
+    end
+})
+
+local autoDeployEnabled = false
+Tabs.Auto:AddToggle("AutoDeployToggle", {
+    Title = "自动跳过大厅 (加入游戏)",
+    Description = "在大厅无模型时自动加入游戏，并安全等待模型加载完毕",
+    Default = false,
+    Callback = function(state)
+        autoDeployEnabled = state
+        if autoDeployEnabled then
+            task.spawn(function()
+                while autoDeployEnabled do
+                    task.wait(1)
+                    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        pcall(function() changeModeEvent:FireServer(true) end)
+                        
+                        local waitTime = 0
+                        while autoDeployEnabled and waitTime < 15 do
+                            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                break
+                            end
+                            task.wait(1)
+                            waitTime = waitTime + 1
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Auto:AddSection("防挂机与投票")
+
+local voteEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Player"):WaitForChild("Vote")
+
+-- [地图投票]
+local selectedMapIndex = 1
+local autoVoteEnabled = false
+
+Tabs.Auto:AddDropdown("MapVoteSelect", {
+    Title = "选择投票地图",
+    Values = {"地图 1", "地图 2", "地图 3", "地图 4"},
+    Default = 1,
+    Callback = function(value)
+        if value == "地图 1" then selectedMapIndex = 1
+        elseif value == "地图 2" then selectedMapIndex = 2
+        elseif value == "地图 3" then selectedMapIndex = 3
+        elseif value == "地图 4" then selectedMapIndex = 4 end
+    end
+})
+
+Tabs.Auto:AddToggle("AutoVoteToggle", {
+    Title = "开启地图自动投票",
+    Description = "每2秒自动为选定地图投票",
+    Default = false,
+    Callback = function(state)
+        autoVoteEnabled = state
+        if autoVoteEnabled then
+            task.spawn(function()
+                while autoVoteEnabled do
+                    pcall(function() voteEvent:FireServer(selectedMapIndex) end)
+                    task.wait(2)
+                end
+            end)
+        end
+    end
+})
+
+-- [模式投票]
+local selectedModeIndex = 1
+local autoModeVoteEnabled = false
+
+Tabs.Auto:AddDropdown("ModeVoteSelect", {
+    Title = "选择投票模式",
+    Values = {"模式 1", "模式 2", "模式 3", "模式 4"},
+    Default = 1,
+    Callback = function(value)
+        if value == "模式 1" then selectedModeIndex = 1
+        elseif value == "模式 2" then selectedModeIndex = 2
+        elseif value == "模式 3" then selectedModeIndex = 3
+        elseif value == "模式 4" then selectedModeIndex = 4 end
+    end
+})
+
+Tabs.Auto:AddToggle("AutoModeVoteToggle", {
+    Title = "开启模式自动投票",
+    Description = "每2秒自动为选定模式投票",
+    Default = false,
+    Callback = function(state)
+        autoModeVoteEnabled = state
+        if autoModeVoteEnabled then
+            task.spawn(function()
+                while autoModeVoteEnabled do
+                    pcall(function() voteEvent:FireServer(selectedModeIndex, true) end)
+                    task.wait(2)
+                end
+            end)
+        end
+    end
+})
+
+-- ==========================================
+-- 模块二：传送功能 (自定义点位与1秒30次传送)
+-- ==========================================
+Tabs.Teleport:AddSection("坐标捕获与传送")
+
+local savedPositions = {}
+local customSaveName = "未命名点位"
+local selectedSaveSlot = "无数据"
+local loopTpEnabled = false
+local TpDropdownObj = nil 
+
+Tabs.Teleport:AddInput("SaveNameInput", {
+    Title = "保存位置名称",
+    Default = "未命名点位",
+    Placeholder = "输入你要保存的名称...",
+    Numeric = false,
+    Finished = false,
+    Callback = function(value)
+        customSaveName = value
+    end
+})
+
+local function updateTpDropdown()
+    local list = {}
+    for name, _ in pairs(savedPositions) do table.insert(list, name) end
+    if #list == 0 then table.insert(list, "无数据") end
+    
+    if TpDropdownObj then
+        TpDropdownObj:SetValues(list)
+        if selectedSaveSlot == "无数据" or not savedPositions[selectedSaveSlot] then
+            selectedSaveSlot = list[1]
+            TpDropdownObj:SetValue(list[1])
+        end
+    end
+end
+
+Tabs.Teleport:AddButton({
+    Title = "保存当前位置",
+    Callback = function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            savedPositions[customSaveName] = hrp.CFrame
+            updateTpDropdown()
+            Fluent:Notify({ Title = "保存成功", Content = "已保存坐标: " .. customSaveName, Duration = 2 })
+        end
+    end
+})
+
+TpDropdownObj = Tabs.Teleport:AddDropdown("TpSlotSelect", {
+    Title = "选择目标位置",
+    Values = {"无数据"},
+    Default = 1,
+    Callback = function(value) selectedSaveSlot = value end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "传送一次",
+    Callback = function()
+        if selectedSaveSlot and savedPositions[selectedSaveSlot] then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.CFrame = savedPositions[selectedSaveSlot]
+            end
+        else
+            Fluent:Notify({ Title = "错误", Content = "选中的槽位还没有保存过位置！", Duration = 2 })
+        end
+    end
+})
+
+Tabs.Teleport:AddToggle("LoopTpToggle", {
+    Title = "持续传送 (30次/秒)",
+    Default = false,
+    Callback = function(state)
+        loopTpEnabled = state
+        if loopTpEnabled then
+            task.spawn(function()
+                while loopTpEnabled do
+                    if selectedSaveSlot and savedPositions[selectedSaveSlot] then
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            hrp.AssemblyLinearVelocity = Vector3.zero
+                            hrp.CFrame = savedPositions[selectedSaveSlot]
+                        end
+                    end
+                    task.wait(1/30)
+                end
+            end)
+        end
+    end
+})
+
+-- ==========================================
+-- 模块三：ESP 透视 (极致优化 CPU 负担)
+-- ==========================================
+Tabs.ESP:AddSection("阵营透视控制")
+
+local playerEspEnabled = false
+local monsterEspEnabled = false
+local playerHighlightColor = Color3.fromRGB(0, 255, 255)
+local monsterHighlightColor = Color3.fromRGB(255, 0, 0)
+local espCache = {}
+
+Tabs.ESP:AddToggle("EnablePlayerESP", {
+    Title = "开启玩家透视",
+    Default = false,
+    Callback = function(state) playerEspEnabled = state end
+})
+
+Tabs.ESP:AddToggle("EnableMonsterESP", {
+    Title = "开启怪物透视",
+    Default = false,
+    Callback = function(state) monsterEspEnabled = state end
+})
+
+Tabs.ESP:AddColorpicker("PlayerColor", {
+    Title = "玩家高亮与文字颜色",
+    Default = Color3.fromRGB(0, 255, 255),
+    Callback = function(color) playerHighlightColor = color end
+})
+
+Tabs.ESP:AddColorpicker("MonsterColor", {
+    Title = "怪物方框与文字颜色",
+    Default = Color3.fromRGB(255, 0, 0),
+    Callback = function(color) monsterHighlightColor = color end
+})
+
+local targetFolderCache = nil
+
+RunService.RenderStepped:Connect(function()
+    if not playerEspEnabled and not monsterEspEnabled then
+        for _, cache in pairs(espCache) do
+            if cache.Highlight then cache.Highlight.Parent = nil end
+            cache.Box.Visible = false
+            cache.Text.Visible = false
+        end
+        return 
+    end
+
+    if not targetFolderCache or not targetFolderCache.Parent then
+        targetFolderCache = Workspace:FindFirstChild("Game") and Workspace.Game:FindFirstChild("Players")
+    end
+    
+    if not targetFolderCache then return end
+
+    for _, entity in ipairs(targetFolderCache:GetChildren()) do
+        if entity:IsA("Model") and entity.PrimaryPart then
+            local root = entity.PrimaryPart
+            
+            if not espCache[entity] then
+                local targetPlayerObj = Players:GetPlayerFromCharacter(entity)
+                
+                espCache[entity] = {
+                    Highlight = Instance.new("Highlight"),
+                    Box = Drawing.new("Square"),
+                    Text = Drawing.new("Text"),
+                    IsRealPlayer = (targetPlayerObj ~= nil),           
+                    IsLocalPlayer = (targetPlayerObj == LocalPlayer)   
+                }
+                
+                espCache[entity].Highlight.FillTransparency = 0.5
+                espCache[entity].Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                espCache[entity].Box.Thickness = 1.5
+                espCache[entity].Box.Filled = false
+                espCache[entity].Text.Size = 14
+                espCache[entity].Text.Center = true
+                espCache[entity].Text.Outline = true
+            end
+            
+            local cache = espCache[entity]
+            
+            if cache.IsLocalPlayer then continue end
+
+            local shouldShow = (cache.IsRealPlayer and playerEspEnabled) or (not cache.IsRealPlayer and monsterEspEnabled)
+            
+            if not shouldShow then
+                if cache.Highlight then cache.Highlight.Parent = nil end
+                cache.Box.Visible = false
+                cache.Text.Visible = false
+                continue
+            end
+
+            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            local dist = math.floor((Camera.CFrame.Position - root.Position).Magnitude)
+            
+            if onScreen then
+                if cache.IsRealPlayer then
+                    cache.Highlight.Parent = entity
+                    cache.Highlight.FillColor = playerHighlightColor
+                    cache.Highlight.OutlineColor = playerHighlightColor
+                    cache.Box.Visible = false
+                    
+                    cache.Text.Visible = true
+                    cache.Text.Text = string.format("[玩家] %s\n%dm", entity.Name, dist)
+                    cache.Text.Color = playerHighlightColor
+                    cache.Text.Position = Vector2.new(pos.X, pos.Y + 30)
+                else
+                    cache.Highlight.Parent = nil 
+                    local size = Vector2.new(2000 / pos.Z, 3000 / pos.Z)
+                    cache.Box.Size = size
+                    cache.Box.Position = Vector2.new(pos.X - size.X / 2, pos.Y - size.Y / 2)
+                    cache.Box.Color = monsterHighlightColor
+                    cache.Box.Visible = true
+                    
+                    cache.Text.Visible = true
+                    cache.Text.Text = string.format("[怪物] %s\n%dm", entity.Name, dist)
+                    cache.Text.Color = monsterHighlightColor
+                    cache.Text.Position = Vector2.new(pos.X, pos.Y + (size.Y / 2) + 5)
+                end
+            else
+                cache.Box.Visible = false
+                cache.Text.Visible = false
+            end
+        end
+    end
+    
+    for entity, cache in pairs(espCache) do
+        if not entity or not entity.Parent then
+            if cache.Highlight then cache.Highlight:Destroy() end
+            if cache.Box then cache.Box:Remove() end
+            if cache.Text then cache.Text:Remove() end
+            espCache[entity] = nil
+        end
+    end
+end)
+
+
+-- ==========================================
+-- 模块四：实用功能 (防踢、帧率检测 & 挂机计时器)
+-- ==========================================
+Tabs.Utility:AddSection("防掉线系统")
+
+local antiAfkConnection = nil
+
+Tabs.Utility:AddToggle("AntiAfkToggle", {
+    Title = "开启防踢出 (移动端安全版)",
+    Description = "静默拦截或模拟触摸，绝不会切换成电脑端UI",
+    Default = false,
+    Callback = function(state)
+        if state then
+            antiAfkConnection = LocalPlayer.Idled:Connect(function()
+                -- 方案一：最高级静默拦截 (推荐，如果执行器支持 getconnections)
+                pcall(function()
+                    for _, v in pairs(getconnections(LocalPlayer.Idled)) do
+                        if v.Disable then
+                            v:Disable()
+                        elseif v.Disconnect then
+                            v:Disconnect()
+                        end
+                    end
+                end)
+                
+                -- 方案二：移动端安全的触摸反馈 (即便方案一失效，也能完美防踢)
+                -- 使用 ClickButton1 模拟屏幕单指点击，引擎识别为 Touch，不会切换成键鼠UI
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton1(Vector2.new(0, 0))
+                end)
+            end)
+        else
+            if antiAfkConnection then
+                antiAfkConnection:Disconnect()
+                antiAfkConnection = nil
+            end
+        end
+    end
+})
+
+Tabs.Utility:AddSection("状态监视器 (右上角显示)")
+
+local fpsEnabled = false
+local fpsConnection = nil
+
+Tabs.Utility:AddToggle("FpsToggle", {
+    Title = "开启帧率 (FPS) 显示",
+    Description = "每秒更新5次，动态变色",
+    Default = false,
+    Callback = function(state)
+        fpsEnabled = state
+        FpsLabel.Visible = state
+        if fpsEnabled then
+            local frames = 0
+            local lastUpdate = tick()
+            fpsConnection = RunService.RenderStepped:Connect(function()
+                frames = frames + 1
+                local now = tick()
+                if now - lastUpdate >= 0.2 then
+                    local fps = math.floor(frames / (now - lastUpdate))
+                    frames = 0
+                    lastUpdate = now
+                    
+                    FpsLabel.Text = "FPS: " .. tostring(fps)
+                    
+                    if fps >= 55 then
+                        FpsLabel.TextColor3 = Color3.fromRGB(0, 255, 0) 
+                    elseif fps >= 30 then
+                        FpsLabel.TextColor3 = Color3.fromRGB(255, 165, 0) 
+                    else
+                        FpsLabel.TextColor3 = Color3.fromRGB(255, 0, 0) 
+                    end
+                end
+            end)
+        else
+            if fpsConnection then
+                fpsConnection:Disconnect()
+                fpsConnection = nil
+            end
+        end
+    end
+})
+
+local timerEnabled = false
+local timerTask = nil
+
+Tabs.Utility:AddToggle("TimerToggle", {
+    Title = "开启挂机计时器",
+    Description = "显示你总共挂机了多长时间",
+    Default = false,
+    Callback = function(state)
+        timerEnabled = state
+        TimerLabel.Visible = state
+        if timerEnabled then
+            local startTime = tick()
+            timerTask = task.spawn(function()
+                while timerEnabled do
+                    local elapsed = math.floor(tick() - startTime)
+                    local mins = math.floor(elapsed / 60)
+                    local secs = elapsed % 60
+                    TimerLabel.Text = string.format("挂机: %02d:%02d", mins, secs)
+                    task.wait(1)
+                end
+            end)
+        else
+            if timerTask then
+                task.cancel(timerTask)
+                timerTask = nil
+            end
+            TimerLabel.Text = "挂机: 00:00"
+        end
+    end
+})
+
+Tabs.Utility:AddButton({
+    Title = "fly",
+    Callback = function()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/haoxiao0/qwqcs/refs/heads/main/tpfly.lua"))()
+    end
+})
+
+Window:SelectTab(1)
